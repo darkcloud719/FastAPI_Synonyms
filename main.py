@@ -9,6 +9,7 @@ from collections import OrderedDict
 from dotenv import load_dotenv 
 from rich import print as pprint
 import os  
+import logging
 
 app = FastAPI()
 
@@ -20,15 +21,18 @@ class SynonymData(BaseModel):
     @field_validator("synonymKeyValue")
     def check_synonym_key_value(cls, v):
         if not v or len(v) < 1:
+            logging.error("SynonymKeyValue cannot be empty")
             raise ValueError("SynonymKeyValue cannot be empty")
         for item in v:
             if not isinstance(item, dict) or not item:
+                logging.error("SynonymKeyValue should contain at least one non-empty directory")
                 raise ValueError("SynonymKeyValue should contain at least one non-empty dictionary")
         return v
     
     @field_validator("mapName")
     def check_mapName(cls, v):
         if v != v.lower():
+            logging.error("MapName should be in Lowercase")
             raise ValueError("MapName should be in Lowercase")
         return v
 
@@ -91,6 +95,7 @@ def get_all_synonymmaps():
         return response
     except Exception as e:
         # Handle exceptions and return error response
+        logging.error(str(e))
         error_response = ResponseModel(code=500, message=str(e))
         return error_response
     
@@ -129,6 +134,7 @@ def get_synonymmap_by_aisearchindexname(indexName: str):
                 response.data[i].synonymKeyValue.append({destination_synonym_str: source_synonym_str_list})
         return response
     except Exception as e:
+        logging.error(str(e))
         error_response = ResponseModel(code=500, message=str(e))
         return error_response
     
@@ -148,11 +154,12 @@ def create_synonym_map(synonymData: SynonymData):
                 synonymMapList.append(f"{source_synonym} => {destination_synonym}")
         # Create synonym map
         search_index_client.create_synonym_map(SynonymMap(name=synonymData.mapName, synonyms=synonymMapList))
+        logging.info(f"Synonym map {synonymData.mapName} created successfully")
         # Flag to indicate if the index was updated
         ifIndexChanged = False
         # Iterate through index fields to add the synonym map name
         for i, field in enumerate(index.fields):
-            if index.fields[i].name == "content":
+            if index.fields[i].name == os.getenv("AZURE_SEARCH_INDEX_FIELD_NAME"):
                 # Add the synonym map name if it does not exist in the field
                 if synonymData.mapName not in index.fields[i].synonym_map_names:
                     index.fields[i].synonym_map_names.append(synonymData.mapName)
@@ -161,10 +168,13 @@ def create_synonym_map(synonymData: SynonymData):
         # Update the index if any changes were made
         if ifIndexChanged:
             search_index_client.create_or_update_index(index)
+            logging.info(f"Synonym map {synonymData.mapName} added to {synonymData.indexName} index")
             return ResponseModel(code=200, message=status_codes.get(200))
         else:
+            logging.info(f"Synonym map {synonymData.mapName} already exists in {synonymData.indexName} index")
             return ResponseModel(code=200, message=f"Synonym map {synonymData.mapName} already exists in {synonymData.indexName} index")
     except Exception as e:
+        logging.error(str(e))
         error_response = ResponseModel(code=500, message=str(e), data=[])
         return error_response
     
@@ -181,19 +191,23 @@ def delete_synonym_map(deleteSynonymData:DeleteSynonymData):
         ifIndexChanged = False
         # Iterate through index fields to remove the synonym map name
         for i, field in enumerate(index.fields):
-            if index.fields[i].synonym_map_names is not None and len(field.synonym_map_names) > 0 and index.fields[i].name in ['content', 'description']:
+            if index.fields[i].synonym_map_names is not None and len(field.synonym_map_names) > 0 and index.fields[i].name in [os.getenv("AZURE_SEARCH_INDEX_FIELD_NAME")]:
                     # Remove the synonym map name if it exists in the field
                     if deleteSynonymData.mapName in index.fields[i].synonym_map_names:
                         index.fields[i].synonym_map_names.remove(deleteSynonymData.mapName)
+                        logging.info(f"Synonym map {deleteSynonymData.mapName} removed from {deleteSynonymData.indexName} index")
                         ifIndexChanged = True
         # Update the index if any changes were made
         if ifIndexChanged:
             search_index_client.create_or_update_index(index)
+            logging.info(f"Synonym map {deleteSynonymData.mapName} removed from {deleteSynonymData.indexName} index")
             return ResponseModel(code=200, message=status_codes.get(200))
         else:
+            logging.info(f"Synonym map not found in {deleteSynonymData.indexName} index")
             return ResponseModel(code=200, message=f"Synonym map not found in {deleteSynonymData.indexName} index")
     except Exception as e:
         # Handle exceptions and return error response
+        logging.error(str(e))
         error_response = ResponseModel(code=500, message=str(e))
         return error_response
 
