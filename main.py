@@ -11,6 +11,18 @@ from rich import print as pprint
 import os  
 import logging
 
+# Set the logging level to INFO
+logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
+
+# Create a console handler and print log message to the console
+console_handler = logging.StreamHandler()
+# Set the level of the console handler to INFO
+console_handler.setLevel(logging.INFO)
+# Set the foramt
+console_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+# Add the console handler to the logger
+logging.getLogger().addHandler(console_handler)
+
 app = FastAPI()
 
 class SynonymData(BaseModel):
