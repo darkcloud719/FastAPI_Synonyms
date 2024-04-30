@@ -39,21 +39,29 @@ class SynonymData(BaseModel):
     # Convert explicit mapping to equivalency mapping
     synonymList: List[List[str]] = []
 
+    @field_validator("indexName")
+    # check if indexName exists in Azure AI Search
+    def check_indexName(cls, v):
+        try:
+            search_index_client.get_index(v)
+        except Exception as e:
+            logging.error(str(e))
+            raise ValueError("IndexName does not exist in Azure AI Search")
+        return v
+
+    @field_validator("mapName")
+    def check_mapName(cls, v):
+        if v != v.lower():
+            logging.error("MapName should be in Lowercase")
+            raise ValueError("MapName should be in Lowercase")
+        return v
+
     @field_validator("synonymList")
     def check_synonym_list(cls, v):
         # check if SynonymList is not empty
         if not v or len(v) < 1:
             logging.error("SynonymList cannot be empty")
             raise ValueError("SynonymList cannot be empty")
-        # for item in v:
-        #     if not isinstance(item, dict) or not item:
-        #         logging.error("SynonymKeyValue should contain at least one non-empty directory")
-        #         raise ValueError("SynonymKeyValue should contain at least one non-empty dictionary")
-        # for item in v:
-        #     if not isinstance(item, str) or not item:
-        #         logging.error("SynonymKeyValue should contain at least one non-empty string")
-        #         raise ValueError("SynonymKeyValue should contain at least one non-empty string")
-        # 2D List 
         for subSynonymList in v:
             # cehck if subSynonymList is not empty and whose length is greater than 1
             if not isinstance(subSynonymList,list) or not subSynonymList or not len(subSynonymList) > 1:
@@ -67,20 +75,90 @@ class SynonymData(BaseModel):
                         raise ValueError("SubSynonymList's elements should be non-empty string")
         return v
     
+    
+
+class ReadSynonymData(BaseModel):
+    mapName: constr(min_length=1 , max_length=10)
+    synonymList: List[List[str]] = []
+
+class UpdatedSynonymData(BaseModel):
+    indexName: str
+    mapName: constr(min_length=1 , max_length=10)
+    synonymList: List[List[str]] = []
+
+    @field_validator("indexName")
+    # check if indexName exists in Azure AI Search
+    def check_indexName(cls, v):
+        try:
+            search_index_client.get_index(v)
+        except Exception as e:
+            logging.error(str(e))
+            raise ValueError("IndexName does not exist in Azure AI Search")
+        return v
+
+    @field_validator("mapName")
+    def check_mapName(cls, v):
+        if v != v.lower():
+            logging.error("MapName should be in Lowercase")
+            raise ValueError("MapName should be in Lowercase")
+        try:
+            search_index_client.get_synonym_map(v)
+        except Exception as e:
+            logging.error(str(e))
+            raise ValueError("MapName does not exist in Azure AI Search")
+        return v
+
+    @field_validator("synonymList")
+    def check_synonym_list(cls, v):
+        # check if SynonymList is not empty
+        if not v or len(v) < 1:
+            logging.error("SynonymList cannot be empty")
+            raise ValueError("SynonymList cannot be empty")
+        for subSynonymList in v:
+            # cehck if subSynonymList is not empty and whose length is greater than 1
+            if not isinstance(subSynonymList,list) or not subSynonymList or not len(subSynonymList) > 1:
+                logging.error("SubSynonymList should contain at least two non-empty elements")
+                raise ValueError("SubSynonymList should contain at least two non-empty elements")
+            else:
+                # check if elements of the List are non-empty string
+                for element in subSynonymList:
+                    if not isinstance(element, str) or not element:
+                        logging.error("SubSynonymList's elements should be non-empty string")
+                        raise ValueError("SubSynonymList's elements should be non-empty string")
+        return v
+
+class ReadSynonymDataByIndexName(BaseModel):
+    indexName: str
+    @field_validator("indexName")
+    # check if indexName exists in Azure AI Search
+    def check_indexName(cls, v):
+        try:
+            search_index_client.get_index(v)
+        except Exception as e:
+            logging.error(str(e))
+            raise ValueError("IndexName does not exist in Azure AI Search")
+        return v
+
+class DeleteSynonymData(BaseModel):
+    indexName: str
+    mapName: constr(min_length=1 , max_length=10)
+
+    @field_validator("indexName")
+    # check if indexName exists in Azure AI Search
+    def check_indexName(cls, v):
+        try:
+            search_index_client.get_index(v)
+        except Exception as e:
+            logging.error(str(e))
+            raise ValueError("IndexName does not exist in Azure AI Search")
+        return v
+
     @field_validator("mapName")
     def check_mapName(cls, v):
         if v != v.lower():
             logging.error("MapName should be in Lowercase")
             raise ValueError("MapName should be in Lowercase")
         return v
-
-class ReadSynonymData(BaseModel):
-    mapName: constr(to_lower=True)
-    synonymList: List[List[str]] = []
-
-class DeleteSynonymData(BaseModel):
-    indexName: str
-    mapName: constr(to_lower=True)
 
 # Define ResponseModel with data attribute as Field
 class ResponseModel(BaseModel):
@@ -141,12 +219,12 @@ def get_all_synonymmaps():
         return error_response
     
 # Endpoint of get synonym map by Azure search index name
-@app.get("/get-synonymmap-by-aisearchindexname/{indexName}")
-def get_synonymmap_by_aisearchindexname(indexName: str):
-    search_index_client
+@app.post("/get-synonymmap-by-aisearchindexname")
+# def get_synonymmap_by_aisearchindexname(indexName: str):
+def get_synonymmap_by_aisearchindexname(readSynonymDataByIndexName: ReadSynonymDataByIndexName):
     try:
         # Initialize Azure Search Index Client
-        index = search_index_client.get_index(indexName)
+        index = search_index_client.get_index(readSynonymDataByIndexName.indexName)
         synonymMapNameList = []
         synonymNameMappingList = []
 
@@ -259,6 +337,27 @@ def delete_synonym_map(deleteSynonymData:DeleteSynonymData):
         logging.error(str(e))
         error_response = ResponseModel(code=500, message=str(e))
         return error_response
+
+# Endpoint to update synonym map
+@app.put("/update-synonym-map")
+def update_synonym_map(updatedSynonymData: UpdatedSynonymData):
+    synonymEquivalencyRules = []
+    try:
+        index = search_index_client.get_index(updatedSynonymData.indexName)
+        for i, synonymOneList in enumerate(updatedSynonymData.synonymList):
+            synonymEquivalencyStr = ", ".join(synonymOneList)
+            synonymEquivalencyRules.append(synonymEquivalencyStr)
+
+        search_index_client.create_or_update_synonym_map(SynonymMap(name=updatedSynonymData.mapName, synonyms=synonymEquivalencyRules))
+        logging.info(f"Synonym map {updatedSynonymData.mapName} updated successfully")
+    except Exception as e:
+        logging.error(str(e))
+        error_response = ResponseModel(code=500, message=str(e), data=[])
+        return error_response
+    
+        
+        
+
 
 
 
