@@ -15,30 +15,56 @@ import logging
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 
 # Create a console handler and print log message to the console
-console_handler = logging.StreamHandler()
+# console_handler = logging.StreamHandler()
 # Set the level of the console handler to INFO
-console_handler.setLevel(logging.INFO)
+# console_handler.setLevel(logging.INFO)
 # Set the foramt
-console_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
+# console_handler.setFormatter(logging.Formatter("%(asctime)s - %(levelname)s - %(message)s"))
 # Add the console handler to the logger
-logging.getLogger().addHandler(console_handler)
+# logging.getLogger().addHandler(console_handler)
+
+# Load environment variables and initialize client
+load_dotenv()
+
+# Function to initialize Azure Search Index Client
+service_endpoint = os.getenv("AZURE_SEARCH_SERVICE_ENDPOINT")
+key = os.getenv("AZURE_SEARCH_ADMIN_KEY")
+search_index_client = SearchIndexClient(service_endpoint, AzureKeyCredential(key))
 
 app = FastAPI()
 
 class SynonymData(BaseModel):
     indexName: str
     mapName: constr(min_length=1 , max_length=10)
-    synonymKeyValue: List[dict] = []
+    # Convert explicit mapping to equivalency mapping
+    synonymList: List[List[str]] = []
 
-    @field_validator("synonymKeyValue")
-    def check_synonym_key_value(cls, v):
+    @field_validator("synonymList")
+    def check_synonym_list(cls, v):
+        # check if SynonymList is not empty
         if not v or len(v) < 1:
-            logging.error("SynonymKeyValue cannot be empty")
-            raise ValueError("SynonymKeyValue cannot be empty")
-        for item in v:
-            if not isinstance(item, dict) or not item:
-                logging.error("SynonymKeyValue should contain at least one non-empty directory")
-                raise ValueError("SynonymKeyValue should contain at least one non-empty dictionary")
+            logging.error("SynonymList cannot be empty")
+            raise ValueError("SynonymList cannot be empty")
+        # for item in v:
+        #     if not isinstance(item, dict) or not item:
+        #         logging.error("SynonymKeyValue should contain at least one non-empty directory")
+        #         raise ValueError("SynonymKeyValue should contain at least one non-empty dictionary")
+        # for item in v:
+        #     if not isinstance(item, str) or not item:
+        #         logging.error("SynonymKeyValue should contain at least one non-empty string")
+        #         raise ValueError("SynonymKeyValue should contain at least one non-empty string")
+        # 2D List 
+        for subSynonymList in v:
+            # cehck if subSynonymList is not empty and whose length is greater than 1
+            if not isinstance(subSynonymList,list) or not subSynonymList or not len(subSynonymList) > 1:
+                logging.error("SubSynonymList should contain at least two non-empty elements")
+                raise ValueError("SubSynonymList should contain at least two non-empty elements")
+            else:
+                # check if elements of the List are non-empty string
+                for element in subSynonymList:
+                    if not isinstance(element, str) or not element:
+                        logging.error("SubSynonymList's elements should be non-empty string")
+                        raise ValueError("SubSynonymList's elements should be non-empty string")
         return v
     
     @field_validator("mapName")
@@ -48,12 +74,9 @@ class SynonymData(BaseModel):
             raise ValueError("MapName should be in Lowercase")
         return v
 
-    # class Config:
-    #     validate_assignment = True
-
 class ReadSynonymData(BaseModel):
     mapName: constr(to_lower=True)
-    synonymKeyValue: List[dict] = []
+    synonymList: List[List[str]] = []
 
 class DeleteSynonymData(BaseModel):
     indexName: str
@@ -83,11 +106,11 @@ status_codes = {
 @app.get("/get-all-synonymmaps")
 def get_all_synonymmaps():
     try:
-        global search_index_client
+        search_index_client
         # Retrieve all synonym maps
-        synonymMapList = search_index_client.get_synonym_maps()
+        synonymMapNameList = search_index_client.get_synonym_maps()
         # Extract names of synonym maps
-        names = [synonymMap.name for synonymMap in synonymMapList]
+        names = [synonymMapName.name for synonymMapName in synonymMapNameList]
         # print(names)
         # Initialize response object
         response = ResponseModel(code=200, message=status_codes.get(200))
@@ -98,12 +121,18 @@ def get_all_synonymmaps():
             # Retrieve details of the synonym map
             synonymMap = search_index_client.get_synonym_map(name)
             # Iterate over each synonym in the synonym map
+            # Test Convert explicit mapping to equivalency mapping
+            # for j, synonym_format_str in enumerate(synonymMap.synonyms):
+            #     # Extract destination synonym word and source synonym word list
+            #     destination_synonym_str = synonym_format_str.split("=>")[1].strip()
+            #     source_synonym_str_list = [element.strip() for element in synonym_format_str.split("=>")[0].split(",")]
+            #     # Add synonym mapping to response data
+            #     response.data[i].synonymKeyValue.append({destination_synonym_str: source_synonym_str_list})
             for j, synonym_format_str in enumerate(synonymMap.synonyms):
                 # Extract destination synonym word and source synonym word list
-                destination_synonym_str = synonym_format_str.split("=>")[1].strip()
-                source_synonym_str_list = [element.strip() for element in synonym_format_str.split("=>")[0].split(",")]
+                source_synonym_str_list = [element.strip() for element in synonym_format_str.split(",")]
                 # Add synonym mapping to response data
-                response.data[i].synonymKeyValue.append({destination_synonym_str: source_synonym_str_list})
+                response.data[i].synonymList.append(source_synonym_str_list)
         return response
     except Exception as e:
         # Handle exceptions and return error response
@@ -114,36 +143,41 @@ def get_all_synonymmaps():
 # Endpoint of get synonym map by Azure search index name
 @app.get("/get-synonymmap-by-aisearchindexname/{indexName}")
 def get_synonymmap_by_aisearchindexname(indexName: str):
-    global search_index_client
+    search_index_client
     try:
         # Initialize Azure Search Index Client
         index = search_index_client.get_index(indexName)
-        temp_list = []
+        synonymMapNameList = []
         synonymNameMappingList = []
 
         # retrieve synonym maps associated with the index
         for i, field in enumerate(index.fields):
             if field.synonym_map_names is not None and len(field.synonym_map_names) > 0:
-                for synonymMapData in field.synonym_map_names:
-                    temp_list.append(synonymMapData)
+                for synonymMapName in field.synonym_map_names:
+                    synonymMapNameList.append(synonymMapName)
         # Remove duplicates from the list of synonym map names
         # temp_list = list(set(temp_list))
-        temp_list = list(OrderedDict.fromkeys(temp_list))
+        synonymMapNameList = list(OrderedDict.fromkeys(synonymMapNameList))
 
         # If synonym maps exists, retrieve their details
-        if(len(temp_list)>0):
-            for i, name in enumerate(temp_list):
+        if(len(synonymMapNameList)>0):
+            for i, name in enumerate(synonymMapNameList):
                 synonymNameMappingList.append(search_index_client.get_synonym_map(name))
 
         # Create response model and populate with synonym map details
         response = ResponseModel(code=200, message=status_codes.get(200))
+        # for i, synonymNameMapping in enumerate(synonymNameMappingList):
+        #     response.data.append(SynonymData(indexName=indexName, mapName=synonymNameMapping.name, data=[]))
+        #     for synonym in synonymNameMapping.synonyms:
+        #         synonym_str = ''.join(synonym)
+        #         destination_synonym_str = synonym_str.split("=>")[1].strip()
+        #         source_synonym_str_list = [element.strip() for element in synonym_str.split("=>")[0].split(",")]
+        #         response.data[i].synonymKeyValue.append({destination_synonym_str: source_synonym_str_list})
         for i, synonymNameMapping in enumerate(synonymNameMappingList):
             response.data.append(SynonymData(indexName=indexName, mapName=synonymNameMapping.name, data=[]))
             for synonym in synonymNameMapping.synonyms:
-                synonym_str = ''.join(synonym)
-                destination_synonym_str = synonym_str.split("=>")[1].strip()
-                source_synonym_str_list = [element.strip() for element in synonym_str.split("=>")[0].split(",")]
-                response.data[i].synonymKeyValue.append({destination_synonym_str: source_synonym_str_list})
+                source_synonym_str_list = [element.strip() for element in synonym.split(",")]
+                response.data[i].synonymList.append(source_synonym_str_list)
         return response
     except Exception as e:
         logging.error(str(e))
@@ -153,19 +187,22 @@ def get_synonymmap_by_aisearchindexname(indexName: str):
 # Endpoint to create synonym map    
 @app.post("/create-synonym-map")
 def create_synonym_map(synonymData: SynonymData):
-    global search_index_client
-    synonymMapList = []
+    synonymEquivalencyRules = []
     try:
         # Check if synonym map already exists
         index = search_index_client.get_index(synonymData.indexName)
         # Construct synonym map strings
-        for i, synonymMapKeyValue in enumerate(synonymData.synonymKeyValue):
-            for key, value in synonymMapKeyValue.items():
-                source_synonym = ", ".join(value)
-                destination_synonym = key
-                synonymMapList.append(f"{source_synonym} => {destination_synonym}")
+        # for i, synonymMapKeyValue in enumerate(synonymData.synonymKeyValue):
+        #     for key, value in synonymMapKeyValue.items():
+        #         source_synonym = ", ".join(value)
+        #         destination_synonym = key
+        #         synonymMapList.append(f"{source_synonym} => {destination_synonym}")
+        for i, synonymOneList in enumerate(synonymData.synonymList):
+            synonymEquivalencyStr = ", ".join(synonymOneList)
+            synonymEquivalencyRules.append(synonymEquivalencyStr)
+
         # Create synonym map
-        search_index_client.create_synonym_map(SynonymMap(name=synonymData.mapName, synonyms=synonymMapList))
+        search_index_client.create_synonym_map(SynonymMap(name=synonymData.mapName, synonyms=synonymEquivalencyRules))
         logging.info(f"Synonym map {synonymData.mapName} created successfully")
         # Flag to indicate if the index was updated
         ifIndexChanged = False
@@ -193,12 +230,12 @@ def create_synonym_map(synonymData: SynonymData):
 # Endpoint to delete synonym map 
 @app.delete("/delete-synonym-map")
 def delete_synonym_map(deleteSynonymData:DeleteSynonymData):
-    global search_index_client
+    search_index_client
     try:
-        # Delete the synonym map
-        search_index_client.delete_synonym_map(deleteSynonymData.mapName)
         # Get the index
         index = search_index_client.get_index(deleteSynonymData.indexName)
+        # Delete the synonym map
+        search_index_client.delete_synonym_map(deleteSynonymData.mapName)
         # Flag to indicate if the index was updated
         ifIndexChanged = False
         # Iterate through index fields to remove the synonym map name
@@ -226,13 +263,4 @@ def delete_synonym_map(deleteSynonymData:DeleteSynonymData):
 
 
     
-# Function to initialize Azure Search Index Client
-def initialize_search_client():
-    global search_index_client
-    service_endpoint = os.getenv("AZURE_SEARCH_SERVICE_ENDPOINT")
-    key = os.getenv("AZURE_SEARCH_ADMIN_KEY")
-    search_index_client = SearchIndexClient(service_endpoint, AzureKeyCredential(key))
 
-# Load environment variables and initialize client
-load_dotenv()
-initialize_search_client()
