@@ -252,7 +252,7 @@ def get_synonymmap_by_aisearchindexname(readSynonymDataByIndexName: ReadSynonymD
         #         source_synonym_str_list = [element.strip() for element in synonym_str.split("=>")[0].split(",")]
         #         response.data[i].synonymKeyValue.append({destination_synonym_str: source_synonym_str_list})
         for i, synonymNameMapping in enumerate(synonymNameMappingList):
-            response.data.append(SynonymData(indexName=indexName, mapName=synonymNameMapping.name, data=[]))
+            response.data.append(SynonymData(indexName=readSynonymDataByIndexName.indexName, mapName=synonymNameMapping.name, data=[]))
             for synonym in synonymNameMapping.synonyms:
                 source_synonym_str_list = [element.strip() for element in synonym.split(",")]
                 response.data[i].synonymList.append(source_synonym_str_list)
@@ -350,6 +350,7 @@ def update_synonym_map(updatedSynonymData: UpdatedSynonymData):
 
         search_index_client.create_or_update_synonym_map(SynonymMap(name=updatedSynonymData.mapName, synonyms=synonymEquivalencyRules))
         logging.info(f"Synonym map {updatedSynonymData.mapName} updated successfully")
+        return ResponseModel(code=200, message=status_codes.get(200))
     except Exception as e:
         logging.error(str(e))
         error_response = ResponseModel(code=500, message=str(e), data=[])
